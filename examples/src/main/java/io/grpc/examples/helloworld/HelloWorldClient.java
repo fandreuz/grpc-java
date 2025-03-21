@@ -16,15 +16,20 @@
 
 package io.grpc.examples.helloworld;
 
-import io.grpc.Channel;
-import io.grpc.Grpc;
-import io.grpc.InsecureChannelCredentials;
-import io.grpc.ManagedChannel;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import io.opentelemetry.proto.collector.profiles.v1development.ExportProfilesServiceRequest;
+import io.opentelemetry.proto.collector.profiles.v1development.ExportProfilesServiceResponse;
 import io.opentelemetry.proto.collector.profiles.v1development.ProfilesServiceGrpc;
+import io.opentelemetry.proto.profiles.v1development.Profile;
+import io.opentelemetry.proto.profiles.v1development.ResourceProfiles;
+import io.opentelemetry.proto.profiles.v1development.ScopeProfiles;
 
 /**
  * A simple client that requests a greeting from the {@link HelloWorldServer}.
@@ -32,7 +37,8 @@ import io.opentelemetry.proto.collector.profiles.v1development.ProfilesServiceGr
 public class HelloWorldClient {
   private static final Logger logger = Logger.getLogger(HelloWorldClient.class.getName());
 
-  private final GreeterGrpc.GreeterBlockingStub blockingStub;
+  private final ProfilesServiceGrpc.ProfilesServiceBlockingStub blockingStub;
+  private final DeserializeProto deserializer = new DeserializeProto();
 
   /** Construct client for accessing HelloWorld server using the existing channel. */
   public HelloWorldClient(Channel channel) {
@@ -40,21 +46,19 @@ public class HelloWorldClient {
     // shut it down.
 
     // Passing Channels to code makes code easier to test and makes it easier to reuse Channels.
-    blockingStub = GreeterGrpc.newBlockingStub(channel);
+    blockingStub = ProfilesServiceGrpc.newBlockingStub(channel);
   }
 
   /** Say hello to server. */
-  public void greet(String name) {
-    logger.info("Will try to greet " + name + " ...");
-    HelloRequest request = HelloRequest.newBuilder().setName(name).build();
-    HelloReply response;
+  public void export(ExportProfilesServiceRequest exportProfilesServiceRequest) {
+    ExportProfilesServiceResponse response;
     try {
-      response = blockingStub.sayHello(request);
+      response = blockingStub.export(exportProfilesServiceRequest);
     } catch (StatusRuntimeException e) {
       logger.log(Level.WARNING, "RPC failed: {0}", e.getStatus());
       return;
     }
-    logger.info("Greeting: " + response.getMessage());
+    logger.info("Greeting: " + response.toString());
   }
 
   /**
@@ -62,23 +66,19 @@ public class HelloWorldClient {
    * greeting. The second argument is the target server.
    */
   public static void main(String[] args) throws Exception {
-    String user = "world";
     // Access a service running on the local machine on port 50051
     String target = "localhost:50051";
+    String path = "./ciao"
     // Allow passing in the user and target strings as command line arguments
-    if (args.length > 0) {
-      if ("--help".equals(args[0])) {
-        System.err.println("Usage: [name [target]]");
-        System.err.println("");
-        System.err.println("  name    The name you wish to be greeted by. Defaults to " + user);
-        System.err.println("  target  The server to connect to. Defaults to " + target);
-        System.exit(1);
-      }
-      user = args[0];
+    if (args.length <= 1) {
+      System.err.println("Usage: [target][path]");
+      System.err.println("");
+      System.err.println("  target  The server to connect to. Defaults to " + target);
+      System.err.println("  path  The path to the proto file. Defaults to " + path);
+      System.exit(1);
     }
-    if (args.length > 1) {
-      target = args[1];
-    }
+    target = args[0];
+    path = args[1];
 
     // Create a communication channel to the server, known as a Channel. Channels are thread-safe
     // and reusable. It is common to create channels at the beginning of your application and reuse
@@ -89,13 +89,28 @@ public class HelloWorldClient {
     ManagedChannel channel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
         .build();
     try {
+      byte[] data = Files.readAllBytes(Path.of(path));
       HelloWorldClient client = new HelloWorldClient(channel);
-      client.greet(user);
+      Profile profile = client.deserializer.deserializeProto(data);
+      client.export(mapToExportProfilesServiceRequest(profile));
     } finally {
       // ManagedChannels use resources like threads and TCP connections. To prevent leaking these
       // resources the channel should be shut down when it will no longer be used. If it may be used
       // again leave it running.
       channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
     }
+
+  }
+
+  private static ExportProfilesServiceRequest mapToExportProfilesServiceRequest(Profile profile) {
+  ScopeProfiles scopeProfiles = ScopeProfiles.newBuilder()
+          .addProfiles(profile)
+          .build();
+  ResourceProfiles resourceProfiles = ResourceProfiles.newBuilder()
+          .addScopeProfiles(scopeProfiles)
+          .build();
+   return ExportProfilesServiceRequest.newBuilder()
+           .addResourceProfiles(resourceProfiles)
+           .build();
   }
 }

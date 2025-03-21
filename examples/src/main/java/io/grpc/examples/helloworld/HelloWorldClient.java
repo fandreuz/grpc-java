@@ -67,18 +67,21 @@ public class HelloWorldClient {
    */
   public static void main(String[] args) throws Exception {
     // Access a service running on the local machine on port 50051
-    String target = "localhost:50051";
-    String path = "./ciao"
+    String target;
+    String path;
+    String pushInterval;
     // Allow passing in the user and target strings as command line arguments
-    if (args.length <= 1) {
-      System.err.println("Usage: [target][path]");
+    if (args.length <= 2) {
+      System.err.println("Usage: [target][path][interval]");
       System.err.println("");
-      System.err.println("  target  The server to connect to. Defaults to " + target);
-      System.err.println("  path  The path to the proto file. Defaults to " + path);
+      System.err.println("  target  The server to connect to.");
+      System.err.println("  path  The path to the proto file.");
+      System.err.println("  pushInterval  The push interval.");
       System.exit(1);
     }
     target = args[0];
     path = args[1];
+    pushInterval = args[2];
 
     // Create a communication channel to the server, known as a Channel. Channels are thread-safe
     // and reusable. It is common to create channels at the beginning of your application and reuse
@@ -88,18 +91,23 @@ public class HelloWorldClient {
     // use TLS, use TlsChannelCredentials instead.
     ManagedChannel channel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
         .build();
-    try {
-      byte[] data = Files.readAllBytes(Path.of(path));
-      HelloWorldClient client = new HelloWorldClient(channel);
-      Profile profile = client.deserializer.deserializeProto(data);
-      client.export(mapToExportProfilesServiceRequest(profile));
-    } finally {
-      // ManagedChannels use resources like threads and TCP connections. To prevent leaking these
-      // resources the channel should be shut down when it will no longer be used. If it may be used
-      // again leave it running.
-      channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+    while (true) {
+      try {
+        byte[] data = Files.readAllBytes(Path.of(path));
+        HelloWorldClient client = new HelloWorldClient(channel);
+        Profile profile = client.deserializer.deserializeProto(data);
+        client.export(mapToExportProfilesServiceRequest(profile));
+        TimeUnit.SECONDS.sleep(Integer.parseInt(pushInterval));
+      } catch (Exception  e) {
+        System.err.println(e.getMessage());
+        TimeUnit.SECONDS.sleep(1);
+        // ManagedChannels use resources like threads and TCP connections. To prevent leaking these
+        // resources the channel should be shut down when it will no longer be used. If it may be used
+        // again leave it running.
+        channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+        break;
+      }
     }
-
   }
 
   private static ExportProfilesServiceRequest mapToExportProfilesServiceRequest(Profile profile) {

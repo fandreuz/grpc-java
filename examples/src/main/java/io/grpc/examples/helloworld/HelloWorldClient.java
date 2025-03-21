@@ -24,6 +24,7 @@ import io.grpc.StatusRuntimeException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import io.opentelemetry.proto.collector.profiles.v1development.ProfilesServiceGrpc;
 
 /**
  * A simple client that requests a greeting from the {@link HelloWorldServer}.
